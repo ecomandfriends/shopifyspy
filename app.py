@@ -1,55 +1,74 @@
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
 from bs4 import BeautifulSoup
+import re
+import os
 
 app = Flask(__name__)
 CORS(app)
 
-COMMON_APPS = [
-    "klaviyo", "judge.me", "loox", "reconvert", "yotpo",
-    "shopify inbox", "pagefly", "aftership", "gempages",
-    "one click upsell", "booster apps", "bold", "revy", "hulkapps"
-]
-
-@app.route("/analyze", methods=["GET"])
-def analyze():
-    url = request.args.get("url")
-    if not url:
-        return jsonify({"error": "Falta la URL"})
+def analizar_tienda(url):
+    if not url.startswith("http"):
+        url = "https://" + url
 
     try:
-        if not url.startswith("http"):
-            url = "https://" + url
-
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
 
-        script_tags = soup.find_all("script", src=True)
-        html = response.text.lower()
+        texto = soup.get_text().lower()
 
-        apps_found = []
-        for app in COMMON_APPS:
-            if app in html:
-                apps_found.append(app)
+        tecnologias = []
+        if "shopify" in texto or "cdn.shopify" in texto:
+            tecnologias.append("Shopify")
 
-        theme = "Desconocido"
-        for tag in script_tags:
-            if "theme" in tag["src"] or "theme.js" in tag["src"]:
-                theme = tag["src"].split("/")[-2] if "/" in tag["src"] else tag["src"]
+        if "klaviyo" in texto:
+            tecnologias.append("Klaviyo")
 
-        return jsonify({
+        if "gem pages" in texto:
+            tecnologias.append("GemPages")
+
+        if "gempages" in texto:
+            tecnologias.append("GemPages")
+
+        if "judge.me" in texto or "judgeme" in texto:
+            tecnologias.append("Judge.me")
+
+        if "reconvert" in texto:
+            tecnologias.append("ReConvert")
+
+        if "yotpo" in texto:
+            tecnologias.append("Yotpo")
+
+        if "loox" in texto:
+            tecnologias.append("Loox")
+
+        theme = None
+        theme_match = re.search(r"theme\s*['\"]name['\"]\s*:\s*['\"](.+?)['\"]", response.text)
+        if theme_match:
+            theme = theme_match.group(1)
+
+        return {
             "domain": url,
-            "apps_detected": apps_found,
-            "theme": theme
-        })
+            "apps_detected": list(set(tecnologias)),
+            "theme": theme or "No detectado"
+        }
 
     except Exception as e:
-        return jsonify({"error": f"No se pudo analizar la tienda: {str(e)}"})
+        return {
+            "error": "No se pudo analizar la tienda",
+            "detalle": str(e)
+        }
+
+@app.route("/analyze")
+def analizar():
+    url = request.args.get("url")
+    if not url:
+        return jsonify({"error": "Falta la URL"}), 400
+    resultado = analizar_tienda(url)
+    return jsonify(resultado)
 
 if __name__ == "__main__":
-import os
-port = int(os.environ.get("PORT", 5000))
-app.run(host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+
